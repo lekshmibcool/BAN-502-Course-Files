@@ -1,0 +1,62 @@
+```{r}
+options(tidyverse.quiet = TRUE)
+library(titanic)
+library(tidyverse)
+library(tidymodels)
+library(mice) #package for imputation
+library(VIM) #visualizing missingness
+library(naniar) #visualizing missingness
+library(skimr) #alternative way to view dataset summaries
+library(UpSetR) #visualizing missingness
+```
+
+
+Read in dataset   
+```{r}
+Grades <- read_csv("~/MSBA/MIS502/Module-4/class-grades.csv")
+
+```
+
+```{r}
+
+str(Grades)
+summary(Grades)
+skim(Grades)
+
+aggr_plot <- aggr(Grades, col = c("blue", "red"), numbers = TRUE, sortVars = TRUE, labels = names(Grades), cex.axis = 0.5, gap = 3)
+vim_plot = aggr(Grades, numbers = TRUE, prop = c(TRUE, FALSE),cex.axis=.7)
+
+vis_miss(Grades)
+
+grades_rowdel = Grades %>% drop_na() 
+#alternatively can specify which variable(s) on which to do the drop_na
+#drop_na(Age)
+skim(grades_rowdel)
+
+n_rows <- nrow(grades_rowdel)
+n_rows
+
+grades_coldel = Grades%>% select_if(~ !any(is.na(.))) 
+vim_plot = aggr(grades_coldel, numbers = TRUE, prop = c(TRUE, FALSE),cex.axis=.7)
+skim(grades_coldel)
+
+n_col <- ncol(grades_coldel)
+n_col
+
+set.seed(123) #sets seed for random number generator
+imp_grade = mice(Grades, m=5, method='pmm', printFlag=FALSE)
+#m is the number of imputations, 5 is a reasonable value as a default
+#pmm is "predictive mean matching" = imputation method for numeric data
+#printFlag reduces amount of output
+summary(imp_grade)
+
+grade_complete = complete(imp_grade) 
+summary(grade_complete)
+
+imputed_combined <- complete(imp_grade, "long")
+
+mean_final <- mean(imputed_combined$Final, na.rm = TRUE)
+mean_final
+
+```
+

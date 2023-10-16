@@ -1,0 +1,245 @@
+```{r}
+library(titanic)
+library(tidyverse)
+library(tidymodels)
+library(mice) #package for imputation
+library(VIM) #visualizing missingness
+library(rpart) #for classification trees
+library(rpart.plot) #for plotting trees
+library(RColorBrewer) #better visualization of classification trees
+library(rattle) 
+library(caret)
+```
+```{r}
+heart= heart_disease_1 <- read_csv("~/MSBA/MIS502/Module-4/heart_disease-1.csv")
+```
+```{r}
+str(heart)
+summary(heart)
+```
+```{r}
+heart<-heart %>%
+  mutate(
+    Sex = factor(Sex),                               # Convert "sex" to a factor
+    ChestPainType = factor(ChestPainType),           # Convert "ChestPainType" to a factor
+    RestingECG = factor(RestingECG),                 # Convert "RestingECG" to a factor
+    ExerciseAngina = factor(ExerciseAngina),         # Convert "ExerciseAngina" to a factor
+    ST_Slope = factor(ST_Slope),                     # Convert "ST_Slope" to a factor
+    HeartDisease = recode(HeartDisease,              # Recode "HeartDisease"
+                          `0` = "No",
+                          `1` = "Yes"))
+```
+
+
+```{r}
+
+set.seed(12345) 
+heart_split = initial_split(heart, prop = 0.7, strata = HeartDisease) #70% in training
+train = training(heart_split) 
+test = testing(heart_split)
+
+nrow(train)
+```
+```{r}
+heart_recipe = recipe(HeartDisease ~., train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree() %>% 
+  set_engine("rpart", model = TRUE) %>% #don't forget the model = TRUE flag
+  set_mode("classification")
+
+heart_wflow = 
+  workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(heart_recipe)
+
+heart_fit = fit(heart_wflow, train)
+```
+
+```{r}
+#look at the tree's fit
+heart_fit %>%
+  pull_workflow_fit() %>%
+  pluck("fit")  
+```
+```{r}
+#extract the tree's fit from the fit object
+tree = heart_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+
+#plot the tree
+rpart.plot(tree)
+```
+```{r}
+#alternative
+fancyRpartPlot(tree) 
+```
+
+```{r}
+heart_fit$fit$fit$fit$cptable
+```
+
+```{r}
+
+set.seed(234)
+folds = vfold_cv(train, v = 5)
+```
+
+```{r}
+heart_recipe = recipe(HeartDisease ~., train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+tree_model = decision_tree(cost_complexity = tune()) %>% 
+  set_engine("rpart", model = TRUE) %>% #don't forget the model = TRUE flag
+  set_mode("classification")
+
+tree_grid = grid_regular(cost_complexity(),
+                          levels = 25) #try 25 sensible values for cp
+
+heart_wflow = 
+  workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(heart_recipe)
+
+tree_res = 
+  heart_wflow %>% 
+  tune_grid(
+    resamples = folds,
+    grid = tree_grid
+    )
+
+tree_res
+```
+
+```{r}
+tree_res %>%
+  collect_metrics() %>%
+  ggplot(aes(cost_complexity, mean)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) 
+```
+
+```{r}
+best_tree = tree_res %>%
+  select_best("accuracy")
+
+best_tree
+```
+```{r}
+final_wf = 
+  heart_wflow %>% 
+  finalize_workflow(best_tree)
+```
+
+```{r}
+final_fit = fit(final_wf, train)
+
+tree = final_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+
+fancyRpartPlot(tree, tweak = 1.2) 
+
+```
+
+
+```{r}
+treepred = predict(final_fit, train, type = "class")
+head(treepred)
+```
+
+```{r}
+confusionMatrix(treepred$.pred_class,train$HeartDisease,positive="Yes") #predictions first then actual
+```
+
+```{r}
+# Create a confusion matrix
+conf_matrix <- table(treepred$.pred_class, train$HeartDisease)
+
+# Extract TP, TN, FP, FN
+TP <- conf_matrix["Yes", "Yes"]
+TN <- conf_matrix["No", "No"]
+FP <- conf_matrix["Yes", "No"]
+FN <- conf_matrix["No", "Yes"]
+
+# Calculate accuracy
+accuracy <- (TP + TN) / (TP + TN + FP + FN)
+
+# Print accuracy
+cat("Accuracy on the training set:", round(accuracy, 4))
+
+```
+
+```{r}
+# Calculate sensitivity
+sensitivity <- TP / (TP + FN)
+
+# Print sensitivity
+cat("Sensitivity on the training set:", round(sensitivity, 4))
+
+```
+```{r}
+# Calculate the naive accuracy
+naive_accuracy <- max(table(train$HeartDisease)) / nrow(train)
+
+# Print the naive accuracy
+cat("Naive Accuracy on the training set:", round(naive_accuracy, 4))
+
+```
+
+```{r}
+treepred_test = predict(final_fit, test, type = "class")
+head(treepred_test)
+```
+
+```{r}
+# Calculate the naive accuracy
+naive_accuracy <- max(table(test$HeartDisease)) / nrow(test)
+
+# Print the naive accuracy
+cat("Naive Accuracy on the training set:", round(naive_accuracy, 4))
+
+```
+
+```{r}
+final_fit = fit(final_wf, test)
+
+tree = final_fit %>% 
+  pull_workflow_fit() %>% 
+  pluck("fit")
+
+fancyRpartPlot(tree, tweak = 1.2) 
+
+
+```
+
+```{r}
+# Create a confusion matrix
+conf_matrix <- table(treepred$.pred_class, test$HeartDisease)
+
+# Extract TP, TN, FP, FN
+TP <- conf_matrix["Yes", "Yes"]
+TN <- conf_matrix["No", "No"]
+FP <- conf_matrix["Yes", "No"]
+FN <- conf_matrix["No", "Yes"]
+
+# Calculate accuracy
+accuracy <- (TP + TN) / (TP + TN + FP + FN)
+
+# Print accuracy
+cat("Accuracy on the training set:", round(accuracy, 4))
+
+```
+
+```{r}
+
+# Calculate accuracy on the testing set
+accuracy_test <- sum(treepred_test == test$HeartDisease) / length(test$HeartDisease)
+
+# Print the accuracy on the testing set
+cat("Accuracy on the testing set:", round(accuracy_test, 4))
+
+```
+

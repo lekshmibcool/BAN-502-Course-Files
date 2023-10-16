@@ -1,0 +1,338 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+# Predictive Data Analysis of Ames Home sale Data set 
+
+
+Libraries  
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(readr)
+library(e1071) #often needed for various statistical tasks
+library(ROCR) #for threshold selction
+library(mice) #package for imputation
+library(VIM) #visualizing missingness
+library(naniar) #visualizing missingness
+library(skimr) #alternative way to view dataset summaries
+library(UpSetR) #visualizing missingness
+library(randomForest)
+library(caret)
+library(splines)
+library(vip)
+library(gridExtra)
+```
+## Reading data
+
+```{r}
+
+ames <- read_csv("~/MSBA/MIS502/Course project/ames_student-1.csv")
+class(ames)
+
+```
+##Examine the summary and structure of data
+
+```{r}
+str(ames)
+summary(ames)
+```
+## Conver to numberic values
+
+```{r}
+dt_categorical <- ames[,colnames(ames)[grepl('factor|logical|character',sapply(ames,class))]]
+dt_categorical
+
+col_names <- names(dt_categorical)
+ames[,col_names] <- lapply(ames[,col_names] , factor)
+str(ames)
+
+```
+
+## Setting seed and Spliting data into 80 - 20 
+
+```{r}
+set.seed(71)
+ames_split = initial_split(ames, prop = 0.80, strata = Above_Median)
+train = training(ames_split)
+test = testing(ames_split)
+
+dim(train)
+
+sapply(train, class)
+
+levels(train$Above_Median)
+```
+
+Visualize using the training set (looking at relationship between Above_Median and the other variables)
+```{r}
+
+ggplot(train,aes(x=Above_Median, y=Neighborhood)) + geom_boxplot() + 
+  theme_bw()
+
+ggplot(train,aes(x=Above_Median, fill = Neighborhood)) + geom_bar()
+
+```
+
+Visualize using the training set (looking at relationship between Above_Median and the other variables).  
+```{r}
+ggplot(train,aes(x=Above_Median, y=Neighborhood)) + geom_boxplot() + 
+  theme_bw()
+```
+
+
+```{r}
+ggplot(train,aes(x=Above_Median,y=Gr_Liv_Area)) + geom_boxplot()
+ggplot(train,aes(x=Above_Median,y=Neighborhood)) + geom_boxplot()
+```
+
+Visualization  
+```{r}
+p1 = ggplot(train, aes(x = Overall_Qual, fill = Above_Median)) + geom_bar(position = "fill")
+p2 = ggplot(train, aes(x = Gr_Liv_Area, fill = Above_Median)) + geom_bar(position = "fill")
+p3 = ggplot(train, aes(x = MS_SubClass, fill = Above_Median)) + geom_bar(position = "fill")
+p4 = ggplot(train, aes(x = Lot_Area, fill = Above_Median)) + geom_bar(position = "fill")
+grid.arrange(p1,p2,p3,p4)
+
+
+```
+```{r}
+p1 = ggplot(train, aes(x = Year_Built, fill = Above_Median)) + geom_bar(position = "fill")
+p2 = ggplot(train, aes(x = Garage_Cars, fill = Above_Median)) + geom_bar(position = "fill")
+p3 = ggplot(train, aes(x = Garage_Area, fill = Above_Median)) + geom_bar(position = "fill")
+p4 = ggplot(train, aes(x = Full_Bath, fill = Above_Median)) + geom_bar(position = "fill")
+grid.arrange(p1,p2,p3,p4)
+```
+
+```{r}
+p1 = ggplot(train, aes(x = Neighborhood, fill = Above_Median)) + geom_bar(position = "fill")
+p2 = ggplot(train, aes(x = Lot_Shape, fill = Above_Median)) + geom_bar(position = "fill")
+p3 = ggplot(train, aes(x = House_Style, fill = Above_Median)) + geom_bar(position = "fill")
+p4 = ggplot(train, aes(x = Utilities, fill = Above_Median)) + geom_bar(position = "fill")
+grid.arrange(p1,p2,p3,p4)
+```
+
+```{r}
+p1 = ggplot(train, aes(x = Bsmt_Cond, fill = Above_Median)) + geom_bar(position = "fill")
+p2 = ggplot(train, aes(x = Bsmt_Exposure, fill = Above_Median)) + geom_bar(position = "fill")
+p3 = ggplot(train, aes(x = BsmtFin_Type_1, fill = Above_Median)) + geom_bar(position = "fill")
+p4 = ggplot(train, aes(x = Bsmt_Qual, fill = Above_Median)) + geom_bar(position = "fill")
+grid.arrange(p1,p2,p3,p4)
+```
+
+```{r}
+
+p1 = ggplot(train, aes(x = Above_Median, y = Gr_Liv_Area)) + geom_boxplot()
+p2 = ggplot(train, aes(x = Above_Median, y = Neighborhood)) + geom_boxplot()
+p3 = ggplot(train, aes(x = Above_Median, y = MS_SubClass)) + geom_boxplot()
+grid.arrange(p1,p2,p3, ncol = 2)
+
+```
+
+
+```{r}
+t1 = table(ames$Above_Median,ames$Neighborhood)
+prop.table(t1, margin = 2)
+
+```
+
+Set-up the folds for k-fold. Here we'll use 10 folds (the standard). However, if you have an enormous dataset or are running a technique that is computationally-intensive, it can be advisable to reduce to 5 or 3 folds.  
+
+# Run algorithms using 10-fold cross validation
+```{r}
+
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+
+```
+
+#logistic regression
+
+```{r}
+ames_fit <- train(Above_Median~., data=train, method="glm", metric=metric, trControl=control)
+
+summary(ames_fit)
+
+```
+
+
+## Develop predictions  
+
+Predictions  
+```{r}
+trainpredrf = predict(ames_fit, train)
+head(trainpredrf)
+```
+
+```{r}
+predictions = predict(ames_fit, ames, type="prob") #develop predicted probabilities
+head(predictions)
+```
+
+Predictions with prob yes 
+```{r}
+predictions = predict(ames_fit, ames, type="prob")[2]
+head(predictions)
+```
+
+Confusion matrix on train
+
+```{r}
+
+confusionMatrix(trainpredrf, train$Above_Median, positive = "Yes")
+
+```
+
+On Test
+Predictions on test
+
+```{r}
+testpredrf = predict(ames_fit, test)
+head(testpredrf)
+confusionMatrix(testpredrf, test$Above_Median, 
+                positive = "Yes")
+```
+## ROC Curve
+```{r}
+#Change this next line to the names of your predictions and the response variable in the training data frame
+ROCRpred = prediction(predictions, ames$Above_Median) 
+
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+```
+
+Area under the curve (AUC). AUC is a measure of the strength of the model. Values closer to 1 are better. Can be used to compare models. 
+
+```{r}
+
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+
+```{r}
+
+#Determine threshold to balance sensitivity and specificity
+#DO NOT modify this code
+opt.cut = function(perf, pred){
+    cut.ind = mapply(FUN=function(x, y, p){
+        d = (x - 0)^2 + (y-1)^2
+        ind = which(d == min(d))
+        c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+            cutoff = p[[ind]])
+    }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(ROCRperf, ROCRpred))
+```
+
+Test thresholds to evaluate accuracy  
+```{r}
+#confusion matrix
+#The "No" and "Yes" represent the actual values
+#The "FALSE" and "TRUE" represent our predicted values
+t1 = table(ames$Above_Median,predictions > 0.9337384)
+t1
+```
+
+Calculate accuracy  
+```{r}
+(t1[1,1]+t1[2,2])/nrow(ames)
+```
+
+Can apply trial and error to maximize accuracy (here trying 0.5 as threshold)
+```{r}
+t1 = table(ames$Above_Median,predictions > 0.5)
+t1
+(t1[1,1]+t1[2,2])/nrow(ames)
+```
+
+Threshold = 0.6  
+```{r}
+t1 = table(ames$Above_Median,predictions > 0.6)
+t1
+(t1[1,1]+t1[2,2])/nrow(ames)
+```
+
+Above calculations shows our model prediction is good with agood accuracy rate .
+
+
+
+
+
+## Random Forest
+
+```{r}
+
+ames_recipe = recipe(Above_Median ~., train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+rf_model = rand_forest() %>% 
+  set_engine("ranger", importance = "permutation") %>% #added importance metric
+  set_mode("classification")
+
+ames_wflow = 
+  workflow() %>% 
+  add_model(rf_model) %>% 
+  add_recipe(ames_recipe)
+
+set.seed(123)
+ames_fit1 = fit(ames_wflow, train)
+
+print(ames_fit1)
+
+
+```
+
+## Predictions  
+```{r}
+trainpredrf = predict(ames_fit1, train)
+head(trainpredrf)
+```
+
+## Confusion matrix on train
+
+```{r}
+confusionMatrix(trainpredrf$.pred_class, train$Above_Median, 
+                positive = "Yes")
+
+```
+
+
+ ## Predictions on test
+
+```{r}
+testpredrf = predict(ames_fit1, test)
+head(testpredrf)
+confusionMatrix(testpredrf$.pred_class, test$Above_Median, 
+                positive = "Yes")
+```
+
+Save the model to a file to load later (if needed)  
+```{r}
+saveRDS(ames_fit1, "ames_fit1.rds")
+```
+
+Load the model  
+```{r}
+ames_fit1 = readRDS("ames_fit1.rds")
+```
+
+Check out variable importance
+```{r}
+ames_fit1 %>% pull_workflow_fit() %>% vip(geom = "point")
+```
+```{r}
+
+set.seed(71)
+# random forest method
+fit.rf <- randomForest(Above_Median~., data=train, method="rf", metric=metric, trControl=control)
+
+rf1 <-randomForest(Above_Median~.,data=train, importance=TRUE,ntree=500)
+print(rf1)
+
+#Evaluate variable importance
+importance(rf1)
+varImpPlot(rf1)
+```
+
